@@ -1,6 +1,6 @@
 # AI Travel Planner 🌍✈️
 
-> **Status: Phase 7 – Travel Assistant Agent** | Destination research, geographic itinerary generation, deterministic budgeting, and source-aware travel assistance are implemented. Other agents and graph orchestration remain planned.
+> **Status: Phase 8 – LangGraph Orchestration** | The four implemented agents are connected through a shared-state workflow with conditional failure handling.
 
 ---
 
@@ -101,7 +101,7 @@ AI-Travel-Planner/
 │
 ├── backend/
 │   ├── agents/          # Research, itinerary, budget, and travel assistant agents
-│   ├── graph/           # Shared LangGraph state (Phase 3); workflow planned
+│   ├── graph/           # Shared LangGraph state and Phase 8 workflow
 │   ├── tools/           # Tavily search, route optimization, and Open-Meteo weather
 │   ├── models/          # Pydantic data models and shared state
 │   ├── api/             # FastAPI routes and middleware
@@ -353,6 +353,70 @@ python -m pytest tests/test_travel_assistant_agent.py -v
 python -m pytest tests/ -v -k "not integration"
 ```
 
+## LangGraph Workflow (Phase 8)
+
+LangGraph connects the existing specialist agents through the single
+`TravelState` TypedDict. The workflow is defined in
+`backend/graph/workflow.py`; node functions call the existing agent modules and
+do not duplicate their logic. The normal execution order is:
+
+```mermaid
+flowchart TD
+        START([START]) --> Research[Destination Research]
+        Research --> ResearchGate{Usable research and attractions?}
+        ResearchGate -->|Yes| Itinerary[Itinerary Planning]
+        ResearchGate -->|No| SkipItinerary[Mark Itinerary Skipped]
+        Itinerary --> BudgetGate{Budget request requirements present?}
+        SkipItinerary --> BudgetGate
+        BudgetGate -->|Yes| Budget[Budget Planning]
+        BudgetGate -->|No| SkipBudget[Mark Budget Skipped]
+        Budget --> Assistant[Travel Assistant]
+        SkipBudget --> Assistant
+        Assistant --> END([END])
+```
+
+Destination research is required before itinerary planning; failed or empty
+research marks itinerary planning skipped. Budget calculations are gated on the
+destination, explicit traveler count, and a positive duration or valid date
+range. Itinerary or budget failures do not discard prior outputs, and the
+Travel Assistant may still return general guidance. Unexpected node exceptions
+are converted to failed statuses and appended to the shared error list.
+`agent_status` and `errors` continue to use their existing reducers, so each
+partial node update preserves previous status and error entries. The workflow
+is sequential; no parallel agent execution is introduced.
+
+Invoke the workflow separately from any API layer:
+
+```python
+from backend.graph.workflow import invoke_travel_workflow
+from backend.models.schemas import TravelRequest
+
+result = invoke_travel_workflow(
+        TravelRequest(
+                destination="Your destination",
+                start_date="2027-06-01",
+                end_date="2027-06-03",
+                duration=3,
+                travelers=2,
+        ),
+        user_request="Plan a three-day visit.",
+        budget_inputs=[],
+        emergency_buffer_percent=0,
+)
+```
+
+`get_workflow()` lazily returns the cached compiled graph;
+`build_workflow()` creates a fresh graph for isolated tests. Neither graph
+construction nor importing the workflow module calls external services.
+Inspect the graph in Python with `get_workflow().get_graph().draw_mermaid()` or
+use `get_workflow_mermaid()` for the Mermaid source. The offline workflow tests
+mock all four agents:
+
+```bash
+python -m pytest tests/test_workflow.py -v
+python -m pytest tests/ -v -k "not integration"
+```
+
 ---
 
 ## Gemini LLM Integration (Phase 2)
@@ -448,12 +512,13 @@ streamlit run frontend/app.py
 | **Phase 5** | Itinerary Planning Agent with geographic route optimization | ✅ Complete |
 | **Phase 6** | Python-only deterministic Budget Planning Agent | ✅ Complete |
 | **Phase 7** | Travel Assistant Agent | ✅ Complete |
-| **Phase 8** | Validation Agent + Response Generator | ⏳ Planned |
-| **Phase 9** | FastAPI REST endpoints | ⏳ Planned |
-| **Phase 10** | Streamlit conversational frontend | ⏳ Planned |
-| **Phase 11** | SQLite persistence, session memory | ⏳ Planned |
-| **Phase 12** | LangSmith tracing, monitoring, evaluation | ⏳ Planned |
-| **Phase 13** | Deployment, CI/CD, production hardening | ⏳ Planned |
+| **Phase 8** | LangGraph orchestration for the existing agents | ✅ Complete |
+| **Phase 9** | Validation Agent + Response Generator | ⏳ Planned |
+| **Phase 10** | FastAPI REST endpoints | ⏳ Planned |
+| **Phase 11** | Streamlit conversational frontend | ⏳ Planned |
+| **Phase 12** | SQLite persistence, session memory | ⏳ Planned |
+| **Phase 13** | LangSmith tracing, monitoring, evaluation | ⏳ Planned |
+| **Phase 14** | Deployment, CI/CD, production hardening | ⏳ Planned |
 
 ---
 
