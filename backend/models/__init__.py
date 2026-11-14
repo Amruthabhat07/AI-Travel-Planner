@@ -22,6 +22,7 @@ from backend.models.schemas import (
     AdviceItem,
     TravelInformation,
     TravelRequest,
+    ValidationIssue,
     ValidationResult,
 )
 
@@ -41,5 +42,6 @@ __all__ = [
     "AdviceItem",
     "TravelInformation",
     "TravelRequest",
+    "ValidationIssue",
     "ValidationResult",
 ]

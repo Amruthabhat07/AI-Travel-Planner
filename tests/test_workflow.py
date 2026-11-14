@@ -69,10 +69,18 @@ def _install_successful_agents(monkeypatch: pytest.MonkeyPatch, calls: list[tupl
             "agent_status": {"travel_assistant": "completed"},
         }
 
+    def validation(state: TravelState) -> dict[str, Any]:
+        calls.append(("validation_agent", dict(state)))
+        return {
+            "validation_result": {"status": "PASSED", "is_valid": True},
+            "agent_status": {"validation_agent": "completed"},
+        }
+
     monkeypatch.setattr(workflow_module, "destination_research_agent", research)
     monkeypatch.setattr(workflow_module, "itinerary_planning_agent", itinerary)
     monkeypatch.setattr(workflow_module, "budget_planning_agent", budget)
     monkeypatch.setattr(workflow_module, "travel_assistant_agent", assistant)
+    monkeypatch.setattr(workflow_module, "validation_agent", validation)
 
 
 def _install_basic_agents(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,6 +117,14 @@ def _install_basic_agents(monkeypatch: pytest.MonkeyPatch) -> None:
             "agent_status": {"travel_assistant": "completed"},
         },
     )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {
+            "validation_result": {"status": "PASSED", "is_valid": True},
+            "agent_status": {"validation_agent": "completed"},
+        },
+    )
 
 
 def test_graph_builds_and_compiles() -> None:
@@ -118,7 +134,7 @@ def test_graph_builds_and_compiles() -> None:
     assert compiled.get_graph() is not None
 
 
-def test_all_four_agent_nodes_are_registered() -> None:
+def test_all_agent_nodes_are_registered() -> None:
     nodes = workflow_module.get_workflow().get_graph().nodes
 
     assert set(workflow_module.AGENT_NODE_NAMES).issubset(nodes)
@@ -135,11 +151,12 @@ def test_successful_agents_run_in_defined_order_and_outputs_flow(
     result = compiled.invoke(workflow_module.create_initial_travel_state(_request()))
 
     assert [name for name, _ in calls] == [
-        "destination_research", "itinerary_planning", "budget_planning", "travel_assistant"
+        "destination_research", "itinerary_planning", "budget_planning", "travel_assistant", "validation_agent"
     ]
     assert calls[1][1]["destination_research"]["destination"] == "Destination City"
     assert calls[2][1]["itinerary"][0]["title"] == "Explore"
     assert calls[3][1]["budget_breakdown"]["total_estimated_cost"] == "250.00"
+    assert calls[4][1]["travel_information"]["weather_summary"] == "Forecast available."
     assert result["itinerary"][0]["title"] == "Explore"
     assert result["budget_breakdown"]["total_estimated_cost"] == "250.00"
     assert result["travel_information"]["weather_summary"] == "Forecast available."
@@ -149,7 +166,9 @@ def test_successful_agents_run_in_defined_order_and_outputs_flow(
         "itinerary_planning": "completed_with_geographic_optimization",
         "budget_planning": "completed_partial",
         "travel_assistant": "completed",
+        "validation_agent": "completed",
     }
+    assert result["validation_result"]["status"] == "PASSED"
 
 
 def test_research_failure_skips_itinerary_but_continues_budget_and_assistant(
@@ -178,6 +197,11 @@ def test_research_failure_skips_itinerary_but_continues_budget_and_assistant(
         workflow_module,
         "travel_assistant_agent",
         lambda _state: calls.append("assistant") or {"travel_information": {"packing_recommendations": []}, "agent_status": {"travel_assistant": "completed_with_warnings"}},
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {"validation_result": {"status": "PARTIAL", "is_valid": True}, "agent_status": {"validation_agent": "completed_partial"}},
     )
 
     result = workflow_module.build_workflow().invoke(
@@ -227,6 +251,11 @@ def _install_downstream_success_agents(monkeypatch: pytest.MonkeyPatch) -> None:
         "travel_assistant_agent",
         lambda _state: {"agent_status": {"travel_assistant": "completed_with_warnings"}},
     )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {"validation_result": {"status": "PARTIAL", "is_valid": True}, "agent_status": {"validation_agent": "completed_partial"}},
+    )
 
 
 def test_itinerary_failure_preserves_research_and_continues_later_agents(
@@ -256,6 +285,11 @@ def test_itinerary_failure_preserves_research_and_continues_later_agents(
         "travel_assistant_agent",
         lambda state: seen.append(dict(state)) or {"travel_information": {"packing_recommendations": []}, "agent_status": {"travel_assistant": "completed_with_warnings"}},
     )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {"validation_result": {"status": "PARTIAL", "is_valid": True}, "agent_status": {"validation_agent": "completed_partial"}},
+    )
 
     result = workflow_module.build_workflow().invoke(
         workflow_module.create_initial_travel_state(_request())
@@ -284,6 +318,11 @@ def test_budget_failure_preserves_upstream_outputs_and_runs_assistant(
         workflow_module,
         "travel_assistant_agent",
         lambda state: assistant_seen.append(dict(state)) or {"agent_status": {"travel_assistant": "completed_with_warnings"}},
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {"validation_result": {"status": "PARTIAL", "is_valid": True}, "agent_status": {"validation_agent": "completed_partial"}},
     )
 
     result = workflow_module.build_workflow().invoke(
@@ -317,6 +356,57 @@ def test_travel_assistant_exception_preserves_all_prior_results(
     assert result["itinerary"]
     assert result["budget_breakdown"]
     assert any("assistant crashed" in error for error in result["errors"])
+
+
+def test_validation_runs_after_travel_assistant_and_preserves_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_successful_agents(monkeypatch, calls := [])
+    state_at_validation: list[dict[str, Any]] = []
+
+    def validation(state: TravelState) -> dict[str, Any]:
+        state_at_validation.append(dict(state))
+        return {
+            "validation_result": {"status": "PASSED_WITH_WARNINGS", "is_valid": True},
+            "agent_status": {"validation_agent": "completed_with_warnings"},
+            "errors": ["validator note"],
+        }
+
+    monkeypatch.setattr(workflow_module, "validation_agent", validation)
+    result = workflow_module.build_workflow().invoke(
+        workflow_module.create_initial_travel_state(_request())
+    )
+
+    assert [name for name, _ in calls][-1] == "travel_assistant"
+    assert state_at_validation[0]["travel_information"]["weather_summary"] == "Forecast available."
+    assert result["validation_result"]["status"] == "PASSED_WITH_WARNINGS"
+    assert result["errors"] == ["validator note"]
+    assert result["destination_research"]
+    assert result["itinerary"]
+    assert result["budget_breakdown"]
+    assert result["travel_information"]
+
+
+def test_validation_agent_exception_does_not_discard_travel_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_basic_agents(monkeypatch)
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        MagicMock(side_effect=RuntimeError("validator crashed")),
+    )
+
+    result = workflow_module.build_workflow().invoke(
+        workflow_module.create_initial_travel_state(_request())
+    )
+
+    assert result["agent_status"]["validation_agent"] == "failed"
+    assert any("validator crashed" in error for error in result["errors"])
+    assert result["destination_research"]
+    assert result["itinerary"]
+    assert result["budget_breakdown"]
+    assert result["travel_information"]
 
 
 def test_missing_budget_prerequisites_skip_budget_and_preserve_partial_results(
@@ -379,6 +469,11 @@ def test_error_reducer_accumulates_errors_from_nodes(monkeypatch: pytest.MonkeyP
         workflow_module,
         "travel_assistant_agent",
         lambda _state: {"agent_status": {"travel_assistant": "completed_with_warnings"}},
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "validation_agent",
+        lambda _state: {"validation_result": {"status": "FAILED", "is_valid": False}, "agent_status": {"validation_agent": "failed"}},
     )
 
     result = workflow_module.build_workflow().invoke(
@@ -451,6 +546,7 @@ def test_import_and_graph_construction_do_not_call_external_agents(
         "itinerary_planning_agent",
         "budget_planning_agent",
         "travel_assistant_agent",
+        "validation_agent",
     ):
         monkeypatch.setattr(workflow_module, agent_name, MagicMock(side_effect=AssertionError("agent invoked during build")))
 
@@ -462,6 +558,7 @@ def test_import_and_graph_construction_do_not_call_external_agents(
         "itinerary_planning_agent",
         "budget_planning_agent",
         "travel_assistant_agent",
+        "validation_agent",
     ):
         getattr(workflow_module, agent_name).assert_not_called()
 

@@ -8,11 +8,11 @@ Implemented:
     - ItineraryPlanningAgent: Gemini itinerary generation with geographic routing.
     - BudgetPlanningAgent: Deterministic Decimal-based expense calculations.
     - TravelAssistantAgent: Source-aware weather, logistics, packing, and travel advice.
+    - ValidationAgent: Python/Pydantic structural and financial consistency checks.
 
 Planned:
     - CoordinatorAgent   : Understands user intent and routes tasks.
     - ItineraryAgent     : Generates day-by-day travel itineraries.
-    - ValidationAgent    : Reviews the plan for consistency and feasibility.
     - ResponseGenerator  : Compiles all outputs into the final travel guide.
 
 Agents communicate through the shared state defined in backend/graph/.

@@ -1,6 +1,6 @@
 # AI Travel Planner 🌍✈️
 
-> **Status: Phase 8 – LangGraph Orchestration** | The four implemented agents are connected through a shared-state workflow with conditional failure handling.
+> **Status: Phase 9 – Deterministic Validation Agent** | Four specialist agents run through LangGraph, followed by independent Python/Pydantic validation.
 
 ---
 
@@ -67,7 +67,7 @@ User Input
 | **Itinerary Planner** | Generates structured day-by-day itineraries |
 | **Budget Planner** | Estimates flights, hotels, meals, activities; optimizes spend |
 | **Travel Assistant** | Fetches weather, transportation options, packing tips |
-| **Validation** | Checks plan consistency, feasibility, and completeness |
+| **Validation** | Deterministically checks structure, cross-agent consistency, and budget arithmetic |
 | **Response Generator** | Merges all outputs into a polished final travel guide |
 
 All agents share a **typed state graph** managed by LangGraph and communicate through a well-defined shared state object.
@@ -372,7 +372,8 @@ flowchart TD
         BudgetGate -->|No| SkipBudget[Mark Budget Skipped]
         Budget --> Assistant[Travel Assistant]
         SkipBudget --> Assistant
-        Assistant --> END([END])
+        Assistant --> Validation[Deterministic Validation]
+        Validation --> END([END])
 ```
 
 Destination research is required before itinerary planning; failed or empty
@@ -410,10 +411,49 @@ result = invoke_travel_workflow(
 construction nor importing the workflow module calls external services.
 Inspect the graph in Python with `get_workflow().get_graph().draw_mermaid()` or
 use `get_workflow_mermaid()` for the Mermaid source. The offline workflow tests
-mock all four agents:
+mock all five workflow nodes, including validation:
 
 ```bash
 python -m pytest tests/test_workflow.py -v
+python -m pytest tests/ -v -k "not integration"
+```
+
+## Deterministic Validation Agent (Phase 9)
+
+The Python-only Validation Agent in `backend/agents/validation_agent.py` runs
+after the Travel Assistant as the final LangGraph node. It uses Pydantic models
+and explicit Python rules; it does not call Gemini, another LLM, Tavily, or a
+weather API, and it never repairs or rewrites agent outputs.
+
+It checks five areas: request validity, destination research and sources,
+itinerary structure/date/attraction references, budget arithmetic, and travel
+information structure/source metadata. Issues are structured records with a
+category, rule code, field, message, and severity:
+
+- **PASS** — the check succeeded.
+- **WARNING** — information is missing or cannot be verified, but no structural
+        or calculation error was established.
+- **ERROR** — an invalid value, mismatch, or inconsistency was found.
+
+Overall status is `PASSED`, `PASSED_WITH_WARNINGS`, `FAILED`, or `PARTIAL`.
+Missing outputs from agents that failed or were skipped produce a partial report;
+an output missing after an agent reported success is an error. Budget line items
+are independently recalculated with `Decimal` and the Phase 6 two-decimal
+`ROUND_HALF_UP` policy. Subtotal, buffer, total, per-person cost, remaining
+budget, and utilization are checked without currency conversion. Forecast and
+transport source metadata are checked structurally, but the validator does not
+fact-check the real-world truth or currentness of cited material. URL metadata
+alone cannot prove exact fares, timetables, or recommendations.
+
+The workflow stores the structured report in `TravelState.validation_result`,
+adds its own reducer-merged status, and appends validation errors using the
+existing `errors` reducer. All research, itinerary, budget, and travel
+information fields remain unchanged.
+
+Run the deterministic validation and complete offline suites:
+
+```bash
+python -m pytest tests/test_validation_agent.py -v
 python -m pytest tests/ -v -k "not integration"
 ```
 
@@ -513,12 +553,13 @@ streamlit run frontend/app.py
 | **Phase 6** | Python-only deterministic Budget Planning Agent | ✅ Complete |
 | **Phase 7** | Travel Assistant Agent | ✅ Complete |
 | **Phase 8** | LangGraph orchestration for the existing agents | ✅ Complete |
-| **Phase 9** | Validation Agent + Response Generator | ⏳ Planned |
-| **Phase 10** | FastAPI REST endpoints | ⏳ Planned |
-| **Phase 11** | Streamlit conversational frontend | ⏳ Planned |
-| **Phase 12** | SQLite persistence, session memory | ⏳ Planned |
-| **Phase 13** | LangSmith tracing, monitoring, evaluation | ⏳ Planned |
-| **Phase 14** | Deployment, CI/CD, production hardening | ⏳ Planned |
+| **Phase 9** | Deterministic Python/Pydantic Validation Agent | ✅ Complete |
+| **Phase 10** | Final Response Generator | ⏳ Planned |
+| **Phase 11** | FastAPI REST endpoints | ⏳ Planned |
+| **Phase 12** | Streamlit conversational frontend | ⏳ Planned |
+| **Phase 13** | SQLite persistence, session memory | ⏳ Planned |
+| **Phase 14** | LangSmith tracing, monitoring, evaluation | ⏳ Planned |
+| **Phase 15** | Deployment, CI/CD, production hardening | ⏳ Planned |
 
 ---
 

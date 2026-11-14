@@ -453,18 +453,117 @@ class TravelInformation(SchemaModel):
     sources: list[InformationSource] = Field(default_factory=list, description="Deduplicated sources consulted.")
 
 
-class ValidationResult(SchemaModel):
-    """Validation outcome for the assembled plan."""
+ValidationSeverity = Literal["PASS", "WARNING", "ERROR"]
+ValidationCategory = Literal[
+    "travel_request", "destination_research", "itinerary", "budget", "travel_information"
+]
+ValidationStatus = Literal["PASSED", "PASSED_WITH_WARNINGS", "FAILED", "PARTIAL"]
 
-    is_valid: bool = Field(..., description="Whether the plan passed validation.")
-    issues: list[str] = Field(default_factory=list, description="Detected problems.")
-    suggestions: list[str] = Field(default_factory=list, description="Suggested improvements.")
+
+class ValidationIssue(SchemaModel):
+    """One structured result from a deterministic validation rule."""
+
+    severity: ValidationSeverity = Field(..., description="PASS, WARNING, or ERROR.")
+    category: ValidationCategory = Field(..., description="Plan section evaluated by the check.")
+    code: str = Field(..., min_length=1, description="Stable rule identifier.")
+    message: str = Field(..., min_length=1, description="Human-readable check result.")
+    related_field: str | None = Field(default=None, description="State/model field related to the issue.")
+
+
+class ValidationResult(SchemaModel):
+    """Structured summary of deterministic travel-plan validation."""
+
+    status: ValidationStatus = Field(..., description="Overall validation status.")
+    is_valid: bool = Field(..., description="False only when one or more ERROR issues exist.")
+    checks_performed: int = Field(default=0, ge=0, description="Number of individual checks recorded.")
+    checks_passed: int = Field(default=0, ge=0, description="Number of PASS checks.")
+    error_count: int = Field(default=0, ge=0, description="Number of ERROR issues.")
+    warning_count: int = Field(default=0, ge=0, description="Number of WARNING issues.")
+    issues: list[ValidationIssue] = Field(default_factory=list, description="Structured check results.")
+    suggestions: list[str] = Field(default_factory=list, description="Non-destructive follow-up suggestions.")
     budget_within_limit: bool | None = Field(
-        default=None, description="Whether the estimate fits the supplied budget."
+        default=None, description="Whether the independently checked estimate fits the supplied budget."
     )
     itinerary_feasible: bool | None = Field(
-        default=None, description="Whether the itinerary was assessed as feasible."
+        default=None, description="Whether basic itinerary structure and date coverage checks passed."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_report(cls, value: object) -> object:
+        """Accept the earlier string-issue report shape and upgrade it in memory."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        raw_issues = data.get("issues", [])
+        if isinstance(raw_issues, list):
+            legacy_invalid = data.get("is_valid") is False
+            issues = [
+                {
+                    "severity": "ERROR" if legacy_invalid else "WARNING",
+                    "category": "travel_request",
+                    "code": "legacy_issue",
+                    "message": issue,
+                }
+                if isinstance(issue, str)
+                else issue
+                for issue in raw_issues
+            ]
+            data["issues"] = issues
+        else:
+            issues = []
+
+        def severity_of(issue: object) -> object:
+            if isinstance(issue, dict):
+                return issue.get("severity")
+            return getattr(issue, "severity", None)
+
+        if data.get("is_valid") is False and not any(
+            severity_of(issue) == "ERROR" for issue in issues
+        ):
+            issues.append(
+                {
+                    "severity": "ERROR",
+                    "category": "travel_request",
+                    "code": "legacy_invalid_result",
+                    "message": "Legacy validation result was marked invalid.",
+                }
+            )
+            data["issues"] = issues
+        errors = sum(severity_of(issue) == "ERROR" for issue in issues)
+        warnings = sum(severity_of(issue) == "WARNING" for issue in issues)
+        passed = sum(severity_of(issue) == "PASS" for issue in issues)
+        data.setdefault("checks_performed", len(issues))
+        data.setdefault("checks_passed", passed)
+        data.setdefault("error_count", errors)
+        data.setdefault("warning_count", warnings)
+        data.setdefault(
+            "status",
+            "FAILED" if errors else "PASSED_WITH_WARNINGS" if warnings else "PASSED",
+        )
+        return data
+
+    @model_validator(mode="after")
+    def counts_match_issues(self) -> ValidationResult:
+        """Keep summary counters consistent with the structured check records."""
+        errors = sum(issue.severity == "ERROR" for issue in self.issues)
+        warnings = sum(issue.severity == "WARNING" for issue in self.issues)
+        passed = sum(issue.severity == "PASS" for issue in self.issues)
+        if self.checks_performed != len(self.issues):
+            raise ValueError("checks_performed must equal the number of validation issues.")
+        if (self.error_count, self.warning_count, self.checks_passed) != (errors, warnings, passed):
+            raise ValueError("Validation counters must match issue severities.")
+        if self.is_valid != (errors == 0):
+            raise ValueError("is_valid must be false exactly when ERROR issues exist.")
+        if errors and self.status != "FAILED":
+            raise ValueError("Validation status must be FAILED when ERROR issues exist.")
+        if not errors and warnings and self.status == "PASSED":
+            raise ValueError("Validation status cannot be PASSED while WARNING issues exist.")
+        if not errors and not warnings and self.status == "PASSED_WITH_WARNINGS":
+            raise ValueError("PASSED_WITH_WARNINGS requires at least one WARNING issue.")
+        if not errors and not warnings and self.status == "PARTIAL":
+            raise ValueError("PARTIAL status requires at least one WARNING issue.")
+        return self
 
 
 class FinalTravelPlan(SchemaModel):

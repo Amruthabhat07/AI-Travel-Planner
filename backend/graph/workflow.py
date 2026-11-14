@@ -1,4 +1,4 @@
-"""LangGraph orchestration for the four existing travel-planning agents.
+"""LangGraph orchestration for the travel agents and final deterministic validator.
 
 Importing this module defines functions only; it performs no LLM, Tavily, or
 weather requests. A compiled graph is created lazily and cached on first use.
@@ -20,6 +20,7 @@ from backend.agents.budget_planning_agent import budget_planning_agent
 from backend.agents.destination_research_agent import destination_research_agent
 from backend.agents.itinerary_planning_agent import itinerary_planning_agent
 from backend.agents.travel_assistant_agent import travel_assistant_agent
+from backend.agents.validation_agent import validation_agent
 from backend.graph.state import TravelState, create_initial_travel_state
 from backend.models.schemas import BudgetPriceInput, DestinationResearch, TravelRequest
 
@@ -30,6 +31,7 @@ AGENT_NODE_NAMES = (
     "itinerary_planning",
     "budget_planning",
     "travel_assistant",
+    "validation_agent",
 )
 
 AgentCallable = Callable[[TravelState], Mapping[str, Any]]
@@ -167,6 +169,8 @@ def build_workflow() -> CompiledStateGraph[Any, Any, Any, Any]:
     with attractions exists. Budget planning is independently gated by its
     required request data. The Travel Assistant is always allowed to attempt a
     partial result so it can return general guidance when optional outputs fail.
+    Deterministic validation always runs last, including after prerequisite skips
+    or earlier agent failures, and records a partial report when data is absent.
     """
     graph = StateGraph(TravelState)
 
@@ -190,6 +194,10 @@ def build_workflow() -> CompiledStateGraph[Any, Any, Any, Any]:
     graph.add_node(
         "travel_assistant",
         lambda state: _run_agent("travel_assistant", travel_assistant_agent, state),
+    )
+    graph.add_node(
+        "validation_agent",
+        lambda state: _run_agent("validation_agent", validation_agent, state),
     )
 
     graph.add_edge(START, "destination_research")
@@ -219,7 +227,8 @@ def build_workflow() -> CompiledStateGraph[Any, Any, Any, Any]:
     )
     graph.add_edge("budget_planning", "travel_assistant")
     graph.add_edge("skip_budget", "travel_assistant")
-    graph.add_edge("travel_assistant", END)
+    graph.add_edge("travel_assistant", "validation_agent")
+    graph.add_edge("validation_agent", END)
     return graph.compile()
 
 
