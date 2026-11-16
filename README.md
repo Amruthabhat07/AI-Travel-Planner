@@ -478,6 +478,53 @@ section and does not prevent the final node from producing the remaining plan.
 The workflow order is research, itinerary, budget, travel assistant,
 validation, then final response generation.
 
+## FastAPI Backend (Phase 11)
+
+The FastAPI application is a thin REST layer over the existing LangGraph
+workflow. It validates requests with the existing `TravelRequest` and
+`BudgetPriceInput` schemas, invokes `invoke_travel_workflow()`, and returns the
+final plan plus available specialist outputs, validation results, statuses, and
+safe error messages. Partial plans remain successful HTTP responses when the
+workflow produces a final partial response.
+
+Start the backend (after configuring `.env`):
+
+```bash
+uvicorn backend.main:app --reload
+```
+
+Available endpoints:
+
+- `GET /` — API metadata and documentation link.
+- `GET /health` — lightweight operational health check.
+- `GET /api/v1/travel/status` — workflow service availability without execution.
+- `POST /api/v1/travel/plan` — generate a travel plan.
+
+Swagger UI is available at `http://127.0.0.1:8000/docs`. Configure browser
+access with the comma-separated `CORS_ALLOWED_ORIGINS` setting; it defaults to
+local development origins and never defaults to every origin.
+
+Example request:
+
+```json
+{
+  "destination": "Pune",
+  "start_date": "2027-02-01",
+  "end_date": "2027-02-03",
+  "duration": 3,
+  "travelers": 2,
+  "budget": 10000,
+  "currency": "INR",
+  "emergency_buffer_percent": 5
+}
+```
+
+Run the mocked API tests without external services:
+
+```bash
+python -m pytest tests/test_api.py -v
+```
+
 ## Gemini LLM Integration (Phase 2)
 
 ### Overview
@@ -574,7 +621,7 @@ streamlit run frontend/app.py
 | **Phase 8** | LangGraph orchestration for the existing agents | ✅ Complete |
 | **Phase 9** | Deterministic Python/Pydantic Validation Agent | ✅ Complete |
 | **Phase 10** | Final Response Generator | ✅ Complete |
-| **Phase 11** | FastAPI REST endpoints | ⏳ Planned |
+| **Phase 11** | FastAPI REST endpoints | ✅ Complete |
 | **Phase 12** | Streamlit conversational frontend | ⏳ Planned |
 | **Phase 13** | SQLite persistence, session memory | ⏳ Planned |
 | **Phase 14** | LangSmith tracing, monitoring, evaluation | ⏳ Planned |

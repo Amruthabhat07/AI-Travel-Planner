@@ -3,15 +3,14 @@ backend/main.py
 ================
 FastAPI application entry point for the AI Travel Planner backend.
 
-Phase 1 (current):
+Phase 11:
     - Application factory with lifespan context manager.
     - Root health-check endpoint.
     - Structured logging configuration.
     - LangSmith tracing initialisation hook.
 
-Phase 2+:
-    - API routers for travel planning endpoints will be registered here.
-    - Database session middleware will be added.
+    - REST routes invoke the existing LangGraph workflow.
+    - Database integration remains a future phase.
 """
 
 from __future__ import annotations
@@ -107,8 +106,8 @@ def create_app() -> FastAPI:
     )
 
     # ── CORS ─────────────────────────────────────────────────────────────────
-    # In development allow all origins; restrict this in production.
-    origins = ["*"] if cfg.is_development else []
+    # Origins are explicit in every environment; production never defaults to '*'.
+    origins = cfg.allowed_cors_origins
 
     application.add_middleware(
         CORSMiddleware,
@@ -128,8 +127,7 @@ def _register_routes(app: FastAPI) -> None:
     """
     Register all API routes on the given application.
 
-    Phase 1: Only the health-check and root endpoints are registered.
-    Phase 2+: Import and include routers from backend/api/ here.
+    Register lightweight operational routes and the Phase 11 travel router.
     """
 
     @app.get("/", tags=["Root"], summary="API root")
@@ -137,7 +135,9 @@ def _register_routes(app: FastAPI) -> None:
         """Return a welcome message and links to the API documentation."""
         return JSONResponse(
             content={
-                "message": "Welcome to the AI Travel Planner API!",
+                "name": "AI Travel Planner API",
+                "version": "0.1.0",
+                "description": "REST API for the LangGraph multi-agent travel planner.",
                 "phase": "Phase 1 – Project Foundation",
                 "docs": "/docs",
                 "health": "/health",
@@ -156,10 +156,15 @@ def _register_routes(app: FastAPI) -> None:
         return JSONResponse(
             content={
                 "status": "healthy",
-                "service": "ai-travel-planner-backend",
+                "application": "AI Travel Planner API",
+                "operational": True,
                 "version": "0.1.0",
             }
         )
+
+    from backend.api.travel import router as travel_router
+
+    app.include_router(travel_router)
 
 
 # ---------------------------------------------------------------------------

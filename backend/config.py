@@ -125,6 +125,10 @@ class Settings(BaseSettings):
 
     api_host: str = Field(default="0.0.0.0", description="Uvicorn bind host.")
     api_port: int = Field(default=8000, description="Uvicorn bind port.")
+    cors_allowed_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        description="Comma-separated browser origins allowed to call the API.",
+    )
 
     # ── Database ──────────────────────────────────────────────────────────────
 
@@ -185,6 +189,11 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Return True when running in the development environment."""
         return self.app_env.lower() == "development"
+
+    @property
+    def allowed_cors_origins(self) -> list[str]:
+        """Return normalized, explicitly configured CORS origins."""
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
     def configure_langsmith(self) -> None:
         """
