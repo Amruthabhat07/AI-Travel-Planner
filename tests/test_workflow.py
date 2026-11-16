@@ -167,6 +167,7 @@ def test_successful_agents_run_in_defined_order_and_outputs_flow(
         "budget_planning": "completed_partial",
         "travel_assistant": "completed",
         "validation_agent": "completed",
+        "final_response_generator": "completed_partial",
     }
     assert result["validation_result"]["status"] == "PASSED"
 

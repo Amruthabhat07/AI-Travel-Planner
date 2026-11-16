@@ -569,7 +569,7 @@ class ValidationResult(SchemaModel):
 class FinalTravelPlan(SchemaModel):
     """Final structured plan that can be serialized for an API or UI."""
 
-    destination: str = Field(..., min_length=1, description="Planned destination.")
+    destination: str | None = Field(default=None, description="Planned destination, when available.")
     trip_summary: str = Field(default="", description="Summary based on available trip information.")
     itinerary: list[ItineraryDay] = Field(default_factory=list, description="Day-by-day plan.")
     destination_research: DestinationResearch | None = Field(
@@ -582,15 +582,24 @@ class FinalTravelPlan(SchemaModel):
         default=None, description="Practical travel information, if available."
     )
     important_tips: list[str] = Field(default_factory=list, description="Important traveler tips.")
-    total_estimated_cost: float | None = Field(
+    total_estimated_cost: Decimal | None = Field(
         default=None, ge=0, description="Total estimated trip cost, if available."
     )
     currency: str = Field(default="INR", min_length=3, max_length=3, description="Currency code.")
+    generation_status: Literal["complete", "partial"] = Field(
+        default="partial", description="Whether every expected upstream output was available."
+    )
+    markdown_response: str = Field(default="", description="Deterministically formatted Markdown suitable for display.")
+    missing_information: list[str] = Field(default_factory=list, description="Unavailable or incomplete upstream information.")
+    validation_result: ValidationResult | None = Field(default=None, description="Exact validation report, when available.")
+    source_urls: list[str] = Field(default_factory=list, description="Source URLs copied unchanged from upstream outputs.")
 
     @field_validator("destination")
     @classmethod
-    def destination_must_not_be_blank(cls, value: str) -> str:
+    def destination_must_not_be_blank(cls, value: str | None) -> str | None:
         """Reject empty or whitespace-only destinations."""
+        if value is None:
+            return None
         value = value.strip()
         if not value:
             raise ValueError("Destination must not be empty.")

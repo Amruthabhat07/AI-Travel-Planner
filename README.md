@@ -373,7 +373,8 @@ flowchart TD
         Budget --> Assistant[Travel Assistant]
         SkipBudget --> Assistant
         Assistant --> Validation[Deterministic Validation]
-        Validation --> END([END])
+        Validation --> Final[Final Response Generator]
+        Final --> END([END])
 ```
 
 Destination research is required before itinerary planning; failed or empty
@@ -421,7 +422,7 @@ python -m pytest tests/ -v -k "not integration"
 ## Deterministic Validation Agent (Phase 9)
 
 The Python-only Validation Agent in `backend/agents/validation_agent.py` runs
-after the Travel Assistant as the final LangGraph node. It uses Pydantic models
+after the Travel Assistant and immediately before final response generation. It uses Pydantic models
 and explicit Python rules; it does not call Gemini, another LLM, Tavily, or a
 weather API, and it never repairs or rewrites agent outputs.
 
@@ -458,6 +459,24 @@ python -m pytest tests/ -v -k "not integration"
 ```
 
 ---
+
+## Final Response Generator Agent (Phase 10)
+
+`backend/agents/final_response_agent.py` is the final, Python-only workflow
+node. It reads (without modifying) the request, destination research,
+itinerary, budget, travel information, validation report, and accumulated
+errors. It writes `final_plan`, a structured `FinalTravelPlan` with a
+display-ready deterministic Markdown response.
+
+The response contains trip and destination overviews, researched attractions,
+chronologically ordered itinerary days, the original budget values, weather and
+practical information, the exact validation summary and issues, important
+notes, and deduplicated source URLs. No figures are recalculated, no facts or
+URLs are created, and unverified attraction prices are not shown as confirmed
+entry fees. Missing or malformed upstream output becomes an explicit partial
+section and does not prevent the final node from producing the remaining plan.
+The workflow order is research, itinerary, budget, travel assistant,
+validation, then final response generation.
 
 ## Gemini LLM Integration (Phase 2)
 
@@ -554,7 +573,7 @@ streamlit run frontend/app.py
 | **Phase 7** | Travel Assistant Agent | ✅ Complete |
 | **Phase 8** | LangGraph orchestration for the existing agents | ✅ Complete |
 | **Phase 9** | Deterministic Python/Pydantic Validation Agent | ✅ Complete |
-| **Phase 10** | Final Response Generator | ⏳ Planned |
+| **Phase 10** | Final Response Generator | ✅ Complete |
 | **Phase 11** | FastAPI REST endpoints | ⏳ Planned |
 | **Phase 12** | Streamlit conversational frontend | ⏳ Planned |
 | **Phase 13** | SQLite persistence, session memory | ⏳ Planned |
